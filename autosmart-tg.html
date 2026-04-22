@@ -318,10 +318,13 @@
     z-index: 1;
     /* widget рендериться нормально, просто не видний */
   }
-  /* Коли дзвінок активний — піднімаємо widget на екран щоб він міг працювати з аудіо */
-  #el-widget-wrap.call-active {
-    bottom: -200px; /* все ще не видний, але в DOM flow */
+  /* Ховаємо весь нативний UI widget через ::part або загальний override */
+  elevenlabs-convai {
+    /* Приховуємо floating button і весь overlay */
+    --elevenlabs-convai-button-display: none;
   }
+  elevenlabs-convai::part(button) { display: none !important; }
+  elevenlabs-convai::part(overlay) { display: none !important; }
   #el-click-overlay { display: none; }
 
   /* Наша кастомна кнопка виклику */
@@ -672,60 +675,38 @@ function toggleCall() {
 }
 
 function startElCall(widget) {
-  // Спроба 1: прямий JS API (найнадійніший)
-  if (typeof widget.startSession === 'function') {
-    widget.startSession(); return;
+  // Спроба 1: прямий JS API
+  if (typeof widget.startSession === 'function') { widget.startSession(); return; }
+  if (typeof widget.startCall === 'function') { widget.startCall(); return; }
+  // Спроба 2: точний селектор по aria-label (з діагностики)
+  const shadow = widget.shadowRoot;
+  if (shadow) {
+    const btn = shadow.querySelector('button[aria-label="Start a call"]') || shadow.querySelector('button');
+    if (btn) { console.log('Clicking:', btn); btn.click(); return; }
   }
-  if (typeof widget.startCall === 'function') {
-    widget.startCall(); return;
-  }
-  // Спроба 2: Shadow DOM — перебираємо всі кнопки
-  clickWidgetButton(widget, ['start', 'call', 'begin', 'connect', 'мікрофон']);
+  console.warn('Start button not found');
 }
 
 function endElCall(widget) {
-  if (typeof widget.endSession === 'function') {
-    widget.endSession(); return;
+  if (typeof widget.endSession === 'function') { widget.endSession(); return; }
+  if (typeof widget.endCall === 'function') { widget.endCall(); return; }
+  const shadow = widget.shadowRoot;
+  if (shadow) {
+    // Під час дзвінку кнопка змінює aria-label на 'End call'
+    const btn = shadow.querySelector('button[aria-label="End call"]')
+              || shadow.querySelector('button[aria-label="end call"]')
+              || shadow.querySelector('button');
+    if (btn) { console.log('Ending via:', btn); btn.click(); return; }
   }
-  if (typeof widget.endCall === 'function') {
-    widget.endCall(); return;
-  }
-  clickWidgetButton(widget, ['end', 'stop', 'disconnect', 'завершити', 'hang']);
+  console.warn('End button not found');
 }
 
 function clickWidgetButton(widget, keywords) {
+  // Залишаємо як резервний fallback
   const shadow = widget.shadowRoot;
-  if (!shadow) {
-    // Немає shadowRoot — спробуємо знайти кнопку напряму в widget
-    const btn = widget.querySelector('button');
-    if (btn) { btn.click(); return; }
-    console.warn('No shadowRoot and no button found');
-    return;
-  }
-
-  // Логуємо всі кнопки для діагностики
-  const allBtns = shadow.querySelectorAll('button');
-  console.log('EL widget buttons found:', allBtns.length, [...allBtns].map(b => b.textContent + '|' + b.getAttribute('aria-label') + '|' + b.className));
-
-  // Шукаємо по aria-label або class
-  for (const btn of allBtns) {
-    const label = (btn.getAttribute('aria-label') || '').toLowerCase();
-    const cls = (btn.className || '').toLowerCase();
-    const txt = (btn.textContent || '').toLowerCase();
-    for (const kw of keywords) {
-      if (label.includes(kw) || cls.includes(kw) || txt.includes(kw)) {
-        console.log('Clicking button:', btn);
-        btn.click();
-        return;
-      }
-    }
-  }
-
-  // Fallback: клікаємо першу кнопку
-  if (allBtns.length > 0) {
-    console.log('Clicking first button as fallback');
-    allBtns[0].click();
-  }
+  if (!shadow) return;
+  const btn = shadow.querySelector('button');
+  if (btn) btn.click();
 }
 
 // ── INTRO ──
@@ -884,16 +865,30 @@ async function sendText() {
 setMode('text');
 setStatus('idle');
 
-// Діагностика widget після завантаження
+// Ховаємо нативний UI widget + діагностика
 setTimeout(() => {
   const w = getElWidget();
-  if (!w) { console.warn('EL widget element not found at all'); return; }
-  console.log('EL widget found:', w);
-  console.log('EL widget methods:', Object.getOwnPropertyNames(Object.getPrototypeOf(w)).filter(m => typeof w[m] === 'function'));
-  console.log('EL shadowRoot:', w.shadowRoot);
+  if (!w) { console.warn('EL widget not found'); return; }
+
   if (w.shadowRoot) {
+    // Спочатку подивимось структуру
+    const allEls = w.shadowRoot.querySelectorAll('*');
+    console.log('Shadow elements:', [...allEls].map(e => e.tagName + '.' + e.className).join(', '));
+
     const btns = w.shadowRoot.querySelectorAll('button');
-    console.log('Buttons in shadow:', btns.length, [...btns].map(b => ({ text: b.textContent.trim(), label: b.getAttribute('aria-label'), class: b.className })));
+    console.log('Buttons:', [...btns].map(b => ({ text: b.textContent.trim(), label: b.getAttribute('aria-label') })));
+
+    // Ін'єктуємо CSS — ховаємо тільки видимі контейнери, кнопку залишаємо (вона невидима бо wrap off-screen)
+    const style = document.createElement('style');
+    style.textContent = `
+      /* Ховаємо нативний floating UI — overlay, panel, chat window */
+      [class*="overlay"], [class*="backdrop"], [class*="modal"] { display: none !important; }
+      /* Ховаємо саму кнопку виклику EL (вона видна як "Start a call" button) */
+      /* Але НЕ видаляємо — просто opacity 0, щоб click все ще спрацьовував */
+      button { opacity: 0 !important; position: absolute !important; pointer-events: auto !important; }
+    `;
+    w.shadowRoot.appendChild(style);
+    console.log('Shadow UI hidden');
   }
 }, 3000);
 </script>
