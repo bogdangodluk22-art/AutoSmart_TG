@@ -776,20 +776,18 @@ async function sendVoiceText(text) {
       body: JSON.stringify({ message: text, user_id: userId, mode: 'voice' })
     });
 
+    const data = await res.json();
     removeTypingIndicator();
 
-    const contentType = res.headers.get('content-type') || '';
-    if (contentType.includes('audio')) {
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const audio = new Audio(url);
+    const reply = data.reply || '';
+    if (reply) addMessage('andrii', reply);
+
+    if (data.audio_url) {
       setStatus('speaking');
-      audio.play();
-      audio.onended = () => { setStatus('idle'); isBusy = false; URL.revokeObjectURL(url); };
+      const audio = new Audio(data.audio_url);
+      audio.play().catch(() => {});
+      audio.onended = () => { setStatus('idle'); isBusy = false; };
     } else {
-      const data = await res.json();
-      const reply = data.reply || data.text || '';
-      if (reply) addMessage('andrii', reply);
       setStatus('idle');
       isBusy = false;
     }
