@@ -88,7 +88,8 @@
     color: var(--gold);
     text-transform: uppercase;
     transition: all 0.4s ease;
-    z-index: 10;
+    z-index: 20;
+    white-space: nowrap;
   }
 
   #status-badge.active { border-color: rgba(200,169,110,0.8); background: rgba(200,169,110,0.15); }
@@ -146,19 +147,20 @@
     to { transform: scaleY(1); }
   }
 
-  /* ── MODE SWITCHER — поверх відео ── */
+  /* ── MODE SWITCHER — завжди зверху ── */
   #mode-switcher {
     position: relative;
     z-index: 10;
     display: flex;
     gap: 0;
-    margin: 0 16px;
+    margin: 8px 16px 0;
     background: rgba(10,10,15,0.45);
     backdrop-filter: blur(12px);
     -webkit-backdrop-filter: blur(12px);
     border-radius: 10px;
     padding: 3px;
     border: 1px solid rgba(255,255,255,0.08);
+    flex-shrink: 0;
   }
   .mode-btn {
     flex: 1;
@@ -327,8 +329,8 @@
 
   /* У голосовому режимі — чат прихований */
   #app.voice-mode #messages { display: none; }
-  #app.voice-mode #chat-zone { justify-content: flex-end; }
-  #app.voice-mode #video-spacer { flex: 0; }
+  #app.voice-mode #chat-zone { justify-content: center; }
+  #app.voice-mode #video-spacer { flex: 1; }
 
   #call-btn {
     width: 64px; height: 64px;
@@ -486,19 +488,13 @@
     <video id="main-video" playsinline loop muted>
       <source id="main-src" src="https://raw.githubusercontent.com/bogdangodluk22-art/AutoSmart_TG/main/Speaking.mp4" type="video/mp4">
     </video>
-    <div id="nameplate">
-      <div class="name">Андрій Мельник</div>
-      <div class="title">Автоексперт · AutoSmart</div>
-    </div>
+    <!-- nameplate прибрано — залишається тільки в Intro -->
     <div id="audio-viz">
       <span></span><span></span><span></span><span></span><span></span>
     </div>
   </div>
 
-  <!-- Spacer — займає простір "над" контентом -->
-  <div id="video-spacer"></div>
-
-  <!-- MODE SWITCHER -->
+  <!-- MODE SWITCHER — завжди зверху, одразу під status badge -->
   <div id="mode-switcher">
     <button class="mode-btn active" id="btn-text" onclick="setMode('text')">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -514,6 +510,9 @@
       Голос
     </button>
   </div>
+
+  <!-- Spacer — займає простір між switcher і контентом -->
+  <div id="video-spacer"></div>
 
   <!-- CHAT -->
   <div id="chat-zone">
