@@ -327,9 +327,9 @@
   }
   #voice-controls.active { display: flex; }
 
-  /* У голосовому режимі — чат прихований */
+  /* У голосовому режимі — чат прихований, кнопка знизу */
   #app.voice-mode #messages { display: none; }
-  #app.voice-mode #chat-zone { justify-content: center; }
+  #app.voice-mode #chat-zone { justify-content: flex-end; }
   #app.voice-mode #video-spacer { flex: 1; }
 
   #call-btn {
@@ -453,13 +453,15 @@
     top: 12px;
     right: 16px;
     font-family: 'Courier New', monospace;
-    font-size: 10px;
+    font-size: 13px;
+    font-weight: bold;
     letter-spacing: 3px;
-    color: var(--gold);
-    opacity: 0.7;
     text-transform: uppercase;
-    z-index: 10;
+    z-index: 20;
+    text-shadow: 0 1px 8px rgba(0,0,0,0.6);
   }
+  #logo .auto { color: #4da6ff; }
+  #logo .smart { color: #e8a020; }
 </style>
 </head>
 <body>
@@ -483,7 +485,7 @@
 
   <!-- MAIN APP -->
   <div id="video-zone">
-    <span id="logo">AutoSmart</span>
+    <span id="logo"><span class="auto">AUTO</span><span class="smart"> SMART</span></span>
     <div id="status-badge">● Очікування</div>
     <video id="main-video" playsinline loop muted>
       <source id="main-src" src="https://raw.githubusercontent.com/bogdangodluk22-art/AutoSmart_TG/main/Speaking.mp4" type="video/mp4">
