@@ -310,16 +310,19 @@
   }
   #voice-controls.active { display: flex; }
 
-  /* ElevenLabs widget — прихований, але активний */
+  /* ElevenLabs widget — поза екраном але повністю функціональний */
   #el-widget-wrap {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    overflow: hidden;
-    opacity: 0;
-    pointer-events: none;
-    bottom: 0; left: 0;
+    position: fixed;
+    bottom: -9999px;
+    right: 20px;
+    z-index: 1;
+    /* widget рендериться нормально, просто не видний */
   }
+  /* Коли дзвінок активний — піднімаємо widget на екран щоб він міг працювати з аудіо */
+  #el-widget-wrap.call-active {
+    bottom: -200px; /* все ще не видний, але в DOM flow */
+  }
+  #el-click-overlay { display: none; }
 
   /* Наша кастомна кнопка виклику */
   #call-btn {
@@ -558,10 +561,13 @@
     </div>
   </div>
 
-  <!-- ElevenLabs widget — прихований контейнер -->
+  <!-- ElevenLabs widget — тимчасово видимий для кліку, потім ховаємо через CSS поверх -->
   <div id="el-widget-wrap">
     <elevenlabs-convai agent-id="agent_0601kptnnsxxf9vv9wpz4gahq0rn"></elevenlabs-convai>
   </div>
+
+  <!-- Прозорий overlay поверх widget для перехоплення кліків нашою кнопкою -->
+  <div id="el-click-overlay"></div>
 
 </div>
 
@@ -653,43 +659,72 @@ function onCallEnded() {
 
 function toggleCall() {
   const widget = getElWidget();
-  if (!widget) return;
+  if (!widget) {
+    console.warn('EL widget not found');
+    return;
+  }
 
   if (!elConnected) {
-    // Запускаємо дзвінок — знаходимо та клікаємо кнопку виклику у widget
-    const shadow = widget.shadowRoot;
-    if (shadow) {
-      // ElevenLabs widget має кнопку start call всередині shadow DOM
-      const startBtn = shadow.querySelector('button[aria-label*="call"], button[aria-label*="Call"], button.call-button, button[data-testid="call-button"], button');
-      if (startBtn) {
-        startBtn.click();
-        return;
-      }
-    }
-    // Fallback: спробуємо через widget API якщо доступне
-    if (typeof widget.startSession === 'function') {
-      widget.startSession();
-    } else if (typeof widget.startCall === 'function') {
-      widget.startCall();
-    }
+    startElCall(widget);
   } else {
-    // Завершуємо дзвінок
-    const shadow = widget.shadowRoot;
-    if (shadow) {
-      const endBtn = shadow.querySelector('button[aria-label*="end"], button[aria-label*="End"], button[aria-label*="stop"], button[data-testid="end-call"]');
-      if (endBtn) {
-        endBtn.click();
+    endElCall(widget);
+  }
+}
+
+function startElCall(widget) {
+  // Спроба 1: прямий JS API (найнадійніший)
+  if (typeof widget.startSession === 'function') {
+    widget.startSession(); return;
+  }
+  if (typeof widget.startCall === 'function') {
+    widget.startCall(); return;
+  }
+  // Спроба 2: Shadow DOM — перебираємо всі кнопки
+  clickWidgetButton(widget, ['start', 'call', 'begin', 'connect', 'мікрофон']);
+}
+
+function endElCall(widget) {
+  if (typeof widget.endSession === 'function') {
+    widget.endSession(); return;
+  }
+  if (typeof widget.endCall === 'function') {
+    widget.endCall(); return;
+  }
+  clickWidgetButton(widget, ['end', 'stop', 'disconnect', 'завершити', 'hang']);
+}
+
+function clickWidgetButton(widget, keywords) {
+  const shadow = widget.shadowRoot;
+  if (!shadow) {
+    // Немає shadowRoot — спробуємо знайти кнопку напряму в widget
+    const btn = widget.querySelector('button');
+    if (btn) { btn.click(); return; }
+    console.warn('No shadowRoot and no button found');
+    return;
+  }
+
+  // Логуємо всі кнопки для діагностики
+  const allBtns = shadow.querySelectorAll('button');
+  console.log('EL widget buttons found:', allBtns.length, [...allBtns].map(b => b.textContent + '|' + b.getAttribute('aria-label') + '|' + b.className));
+
+  // Шукаємо по aria-label або class
+  for (const btn of allBtns) {
+    const label = (btn.getAttribute('aria-label') || '').toLowerCase();
+    const cls = (btn.className || '').toLowerCase();
+    const txt = (btn.textContent || '').toLowerCase();
+    for (const kw of keywords) {
+      if (label.includes(kw) || cls.includes(kw) || txt.includes(kw)) {
+        console.log('Clicking button:', btn);
+        btn.click();
         return;
       }
-      // Якщо не знайшли специфічну — клікаємо першу кнопку (toggle)
-      const anyBtn = shadow.querySelector('button');
-      if (anyBtn) anyBtn.click();
     }
-    if (typeof widget.endSession === 'function') {
-      widget.endSession();
-    } else if (typeof widget.endCall === 'function') {
-      widget.endCall();
-    }
+  }
+
+  // Fallback: клікаємо першу кнопку
+  if (allBtns.length > 0) {
+    console.log('Clicking first button as fallback');
+    allBtns[0].click();
   }
 }
 
@@ -848,6 +883,19 @@ async function sendText() {
 // ── INIT ──
 setMode('text');
 setStatus('idle');
+
+// Діагностика widget після завантаження
+setTimeout(() => {
+  const w = getElWidget();
+  if (!w) { console.warn('EL widget element not found at all'); return; }
+  console.log('EL widget found:', w);
+  console.log('EL widget methods:', Object.getOwnPropertyNames(Object.getPrototypeOf(w)).filter(m => typeof w[m] === 'function'));
+  console.log('EL shadowRoot:', w.shadowRoot);
+  if (w.shadowRoot) {
+    const btns = w.shadowRoot.querySelectorAll('button');
+    console.log('Buttons in shadow:', btns.length, [...btns].map(b => ({ text: b.textContent.trim(), label: b.getAttribute('aria-label'), class: b.className })));
+  }
+}, 3000);
 </script>
 </body>
 </html>
