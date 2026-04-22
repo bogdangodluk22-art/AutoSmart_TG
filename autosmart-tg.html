@@ -773,23 +773,38 @@ async function sendVoiceText(text) {
     const res = await fetch(N8N_WEBHOOK, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message: text, user_id: userId, mode: 'voice' })
+      body: JSON.stringify({
+        message: text,
+        source: 'voice',
+        user_id: userId,
+        mode: 'voice'   // → n8n буде знати що треба ElevenLabs
+      })
     });
-
     const data = await res.json();
     removeTypingIndicator();
 
-    const reply = data.reply || '';
+    const reply = data.reply || data.text || '';
     if (reply) addMessage('andrii', reply);
 
+    // Якщо n8n повертає audio_url від ElevenLabs
     if (data.audio_url) {
       setStatus('speaking');
       const audio = new Audio(data.audio_url);
-      audio.play().catch(() => {});
+      audio.play();
       audio.onended = () => { setStatus('idle'); isBusy = false; };
     } else {
-      setStatus('idle');
-      isBusy = false;
+      // Fallback: TTS через ElevenLabs напряму якщо є base64
+      if (data.audio_base64) {
+        setStatus('speaking');
+        const blob = b64ToBlob(data.audio_base64, 'audio/mpeg');
+        const url = URL.createObjectURL(blob);
+        const audio = new Audio(url);
+        audio.play();
+        audio.onended = () => { setStatus('idle'); isBusy = false; URL.revokeObjectURL(url); };
+      } else {
+        setStatus('idle');
+        isBusy = false;
+      }
     }
   } catch(e) {
     removeTypingIndicator();
