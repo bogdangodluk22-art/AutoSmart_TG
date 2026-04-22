@@ -521,7 +521,8 @@
 
 <script>
 // ── CONFIG ──
-const N8N_WEBHOOK = 'https://n8n.srv1421181.hstgr.cloud/webhook/autosmart-andrii';
+const N8N_TEXT  = 'https://n8n.srv1421181.hstgr.cloud/webhook/autosmart-text';
+const N8N_VOICE = 'https://n8n.srv1421181.hstgr.cloud/webhook/autosmart-voice';
 const VIDEOS = {
   speaking: 'https://raw.githubusercontent.com/bogdangodluk22-art/AutoSmart_TG/main/Speaking.mp4',
   typing:   'https://raw.githubusercontent.com/bogdangodluk22-art/AutoSmart_TG/main/Typing.mp4',
@@ -676,14 +677,12 @@ async function sendText() {
   setStatus('typing');
 
   try {
-    const res = await fetch(N8N_WEBHOOK, {
+    const res = await fetch(N8N_TEXT, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         message: text,
-        source: 'text',
-        user_id: userId,
-        mode: 'text'
+        user_id: userId
       })
     });
     const data = await res.json();
@@ -770,41 +769,35 @@ async function sendVoiceText(text) {
   setStatus('typing');
 
   try {
-    const res = await fetch(N8N_WEBHOOK, {
+    const res = await fetch(N8N_VOICE, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        message: text,
-        source: 'voice',
-        user_id: userId,
-        mode: 'voice'   // → n8n буде знати що треба ElevenLabs
-      })
+      body: JSON.stringify({ message: text, user_id: userId })
     });
-    const data = await res.json();
+
     removeTypingIndicator();
 
-    const reply = data.reply || data.text || '';
-    if (reply) addMessage('andrii', reply);
+    const contentType = res.headers.get('content-type') || '';
 
-    // Якщо n8n повертає audio_url від ElevenLabs
-    if (data.audio_url) {
+    if (contentType.includes('audio')) {
+      // n8n повертає аудіо напряму як binary
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const audio = new Audio(url);
       setStatus('speaking');
-      const audio = new Audio(data.audio_url);
       audio.play();
-      audio.onended = () => { setStatus('idle'); isBusy = false; };
-    } else {
-      // Fallback: TTS через ElevenLabs напряму якщо є base64
-      if (data.audio_base64) {
-        setStatus('speaking');
-        const blob = b64ToBlob(data.audio_base64, 'audio/mpeg');
-        const url = URL.createObjectURL(blob);
-        const audio = new Audio(url);
-        audio.play();
-        audio.onended = () => { setStatus('idle'); isBusy = false; URL.revokeObjectURL(url); };
-      } else {
+      audio.onended = () => {
         setStatus('idle');
         isBusy = false;
-      }
+        URL.revokeObjectURL(url);
+      };
+    } else {
+      // Текстова відповідь (fallback)
+      const data = await res.json();
+      const reply = data.reply || data.text || '';
+      if (reply) addMessage('andrii', reply);
+      setStatus('idle');
+      isBusy = false;
     }
   } catch(e) {
     removeTypingIndicator();
