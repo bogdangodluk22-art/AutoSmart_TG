@@ -521,8 +521,7 @@
 
 <script>
 // ── CONFIG ──
-const N8N_TEXT  = 'https://n8n.srv1421181.hstgr.cloud/webhook/autosmart-text';
-const N8N_VOICE = 'https://n8n.srv1421181.hstgr.cloud/webhook/autosmart-voice';
+const N8N_WEBHOOK = 'https://n8n.srv1421181.hstgr.cloud/webhook/autosmart-text';
 const VIDEOS = {
   speaking: 'https://raw.githubusercontent.com/bogdangodluk22-art/AutoSmart_TG/main/Speaking.mp4',
   typing:   'https://raw.githubusercontent.com/bogdangodluk22-art/AutoSmart_TG/main/Typing.mp4',
@@ -677,12 +676,14 @@ async function sendText() {
   setStatus('typing');
 
   try {
-    const res = await fetch(N8N_TEXT, {
+    const res = await fetch(N8N_WEBHOOK, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         message: text,
-        user_id: userId
+        source: 'text',
+        user_id: userId,
+        mode: 'text'
       })
     });
     const data = await res.json();
@@ -769,7 +770,7 @@ async function sendVoiceText(text) {
   setStatus('typing');
 
   try {
-    const res = await fetch(N8N_VOICE, {
+    const res = await fetch('https://n8n.srv1421181.hstgr.cloud/webhook/autosmart-voice', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ message: text, user_id: userId })
@@ -778,21 +779,14 @@ async function sendVoiceText(text) {
     removeTypingIndicator();
 
     const contentType = res.headers.get('content-type') || '';
-
     if (contentType.includes('audio')) {
-      // n8n повертає аудіо напряму як binary
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
       const audio = new Audio(url);
       setStatus('speaking');
       audio.play();
-      audio.onended = () => {
-        setStatus('idle');
-        isBusy = false;
-        URL.revokeObjectURL(url);
-      };
+      audio.onended = () => { setStatus('idle'); isBusy = false; URL.revokeObjectURL(url); };
     } else {
-      // Текстова відповідь (fallback)
       const data = await res.json();
       const reply = data.reply || data.text || '';
       if (reply) addMessage('andrii', reply);
