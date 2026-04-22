@@ -521,7 +521,7 @@
 
 <script>
 // ── CONFIG ──
-const N8N_WEBHOOK = 'https://n8n.srv1421181.hstgr.cloud/webhook/autosmart-text';
+const N8N_WEBHOOK = 'https://n8n.srv1421181.hstgr.cloud/webhook/autosmart-andrii';
 const VIDEOS = {
   speaking: 'https://raw.githubusercontent.com/bogdangodluk22-art/AutoSmart_TG/main/Speaking.mp4',
   typing:   'https://raw.githubusercontent.com/bogdangodluk22-art/AutoSmart_TG/main/Typing.mp4',
@@ -770,10 +770,10 @@ async function sendVoiceText(text) {
   setStatus('typing');
 
   try {
-    const res = await fetch('https://n8n.srv1421181.hstgr.cloud/webhook/autosmart-voice', {
+    const res = await fetch(N8N_WEBHOOK, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message: text, user_id: userId })
+      body: JSON.stringify({ message: text, user_id: userId, mode: 'voice' })
     });
 
     removeTypingIndicator();
