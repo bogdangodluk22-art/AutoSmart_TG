@@ -850,9 +850,10 @@ async function sendVoiceText(text) {
   if (!text || isBusy) return;
   isBusy = true;
 
-  addMessage('user', '🎤 ' + text);
-  addTypingIndicator();
-  setStatus('typing');
+  // В голосовому режимі — не показуємо typing індикатор, одразу чекаємо відповіді
+  statusBadge.className = '';
+  statusBadge.textContent = '● Очікування';
+  // Waiting вже грає після stopListening
 
   try {
     const res = await fetch(N8N_WEBHOOK, {
@@ -861,7 +862,7 @@ async function sendVoiceText(text) {
       body: JSON.stringify({ message: text, user_id: userId, mode: 'voice' })
     });
     const data = await res.json();
-    removeTypingIndicator();
+    // немає typing indicator у голосовому режимі — нічого не видаляємо
 
     const reply = data.reply || data.text || '';
     // У голосовому режимі текст не показуємо — тільки аудіо
@@ -880,9 +881,8 @@ async function sendVoiceText(text) {
       isBusy = false;
     }
   } catch(e) {
-    removeTypingIndicator();
     addMessage('andrii', 'Вибачте, виникла помилка. Спробуйте ще раз.');
-    setStatus('idle');
+    startMainVideo('waiting', true);
     isBusy = false;
   }
 }
