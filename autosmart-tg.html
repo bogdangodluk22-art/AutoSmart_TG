@@ -881,11 +881,13 @@ setTimeout(() => {
     // Ін'єктуємо CSS — ховаємо тільки видимі контейнери, кнопку залишаємо (вона невидима бо wrap off-screen)
     const style = document.createElement('style');
     style.textContent = `
-      /* Ховаємо нативний floating UI — overlay, panel, chat window */
-      [class*="overlay"], [class*="backdrop"], [class*="modal"] { display: none !important; }
-      /* Ховаємо саму кнопку виклику EL (вона видна як "Start a call" button) */
-      /* Але НЕ видаляємо — просто opacity 0, щоб click все ще спрацьовував */
-      button { opacity: 0 !important; position: absolute !important; pointer-events: auto !important; }
+      /* Ховаємо обидва overlay (floating panel + "Need help?" popup) */
+      div.overlay { display: none !important; }
+      /* Ховаємо основний wrapper panel */
+      div[class*="transition-[border-radius]"] { display: none !important; }
+      /* Ховаємо ElevenLabs watermark */
+      p[class*="whitespace-nowrap"] { display: none !important; }
+      a[class*="underline"] { display: none !important; }
     `;
     w.shadowRoot.appendChild(style);
     console.log('Shadow UI hidden');
