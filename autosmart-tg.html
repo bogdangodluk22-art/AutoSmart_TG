@@ -539,7 +539,7 @@
             <path d="M19 10v2a7 7 0 0 1-14 0v-2M12 19v4M8 23h8"/>
           </svg>
         </button>
-        <div id="call-hint">Натисніть щоб говорити</div>
+        <div id="call-hint">Натисніть щоб увімкнути мікрофон</div>
       </div>
     </div>
   </div>
@@ -664,6 +664,8 @@ function setMode(m) {
   if (!appStarted) return; // overlay ще відкритий — відео не чіпаємо
 
   if (m === 'text') {
+    // Якщо була активна голосова сесія — зупиняємо
+    if (voiceActive) stopContinuousListening();
     startMainVideo('startChating', false, () => {
       startMainVideo('watching', true);
     });
@@ -795,65 +797,166 @@ function playBase64Audio(base64, onEnded) {
   }
 }
 
+// ── CONTINUOUS VOICE ──
+// Стан: voiceActive = сесія активна (кнопка натиснута)
+// isBusy = Андрій зараз відповідає (recognition пауза)
+// isListening = recognition.start() викликано і працює
+let voiceActive = false;
+let silenceTimer = null;
+let accumulatedTranscript = '';
+let isSpeaking = false; // користувач зараз говорить (є interim results)
+
 function toggleVoice() {
-  if (isBusy) return;
-  // Ініціалізуємо AudioContext прямо тут — це user gesture, autoplay дозволено
-  getAudioCtx();
-  if (!isListening) startListening();
-  else stopListening();
-}
-
-function startListening() {
-  isListening = true;
-  callBtn.classList.add('listening');
-  callHint.textContent = 'Говоріть зараз...';
-  setStatus('listening');
-
-  if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
-    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-    recognition = new SR();
-    recognition.lang = 'uk-UA';
-    recognition.continuous = false;
-    recognition.interimResults = false;
-
-    recognition.onresult = (e) => {
-      const transcript = e.results[0][0].transcript;
-      stopListening();
-      if (transcript) sendVoiceText(transcript);
-    };
-    recognition.onerror = (e) => {
-      console.warn('Speech error:', e.error);
-      stopListening();
-      addMessage('andrii', 'Не вдалося розпізнати. Спробуйте ще раз.');
-      setStatus('idle');
-    };
-    recognition.onend = () => { if (isListening) stopListening(); };
-    recognition.start();
+  getAudioCtx(); // user gesture — ініціалізуємо AudioContext
+  if (!voiceActive) {
+    startContinuousListening();
   } else {
-    stopListening();
-    addMessage('andrii', 'Голосовий ввід не підтримується. Використайте текстовий режим.');
-    setStatus('idle');
+    stopContinuousListening();
   }
 }
 
-function stopListening() {
+function startContinuousListening() {
+  if (!('webkitSpeechRecognition' in window || 'SpeechRecognition' in window)) {
+    addMessage('andrii', 'Голосовий ввід не підтримується. Використайте текстовий режим.');
+    return;
+  }
+
+  voiceActive = true;
+  callBtn.classList.add('listening');
+  callHint.textContent = 'Слухаю... Говоріть';
+  setStatus('listening');
+  accumulatedTranscript = '';
+
+  startRecognitionSession();
+}
+
+function startRecognitionSession() {
+  if (!voiceActive) return;
+
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  recognition = new SR();
+  recognition.lang = 'uk-UA';
+  recognition.continuous = true;       // не зупиняється після паузи
+  recognition.interimResults = true;   // отримуємо проміжні результати
+
+  recognition.onstart = () => {
+    isListening = true;
+  };
+
+  recognition.onresult = (e) => {
+    if (!voiceActive || isBusy) return;
+
+    let interimText = '';
+    let finalText = '';
+
+    for (let i = e.resultIndex; i < e.results.length; i++) {
+      const t = e.results[i][0].transcript;
+      if (e.results[i].isFinal) {
+        finalText += t;
+      } else {
+        interimText += t;
+      }
+    }
+
+    // Є проміжний текст — користувач говорить, скидаємо таймер
+    if (interimText) {
+      clearTimeout(silenceTimer);
+      silenceTimer = null;
+    }
+
+    // Отримали фінальний фрагмент — акумулюємо і запускаємо таймер паузи
+    if (finalText) {
+      accumulatedTranscript += (accumulatedTranscript ? ' ' : '') + finalText.trim();
+      clearTimeout(silenceTimer);
+
+      // 3 секунди тиші після останнього слова → відправляємо
+      silenceTimer = setTimeout(() => {
+        if (accumulatedTranscript && voiceActive && !isBusy) {
+          const textToSend = accumulatedTranscript.trim();
+          accumulatedTranscript = '';
+          sendVoiceText(textToSend);
+        }
+      }, 3000);
+    }
+  };
+
+  recognition.onerror = (e) => {
+    isListening = false;
+    // 'no-speech' — нормальна ситуація, просто рестартуємо
+    if (e.error === 'no-speech' || e.error === 'aborted') {
+      if (voiceActive && !isBusy) setTimeout(() => startRecognitionSession(), 300);
+      return;
+    }
+    console.warn('Speech error:', e.error);
+    // Серйозна помилка — рестартуємо через секунду
+    if (voiceActive && !isBusy) setTimeout(() => startRecognitionSession(), 1000);
+  };
+
+  recognition.onend = () => {
+    isListening = false;
+    // Браузер зупинив сесію (таймаут ~60с) — автоматично рестартуємо
+    if (voiceActive && !isBusy) {
+      setTimeout(() => startRecognitionSession(), 200);
+    }
+  };
+
+  try {
+    recognition.start();
+  } catch(e) {
+    console.warn('Recognition start error:', e);
+    if (voiceActive && !isBusy) setTimeout(() => startRecognitionSession(), 500);
+  }
+}
+
+function pauseRecognition() {
+  // Зупиняємо recognition поки Андрій говорить (щоб не записував свою відповідь)
   isListening = false;
-  callBtn.classList.remove('listening');
-  callHint.textContent = 'Натисніть щоб говорити';
+  clearTimeout(silenceTimer);
+  silenceTimer = null;
   if (recognition) {
     try { recognition.stop(); } catch(e) {}
     recognition = null;
   }
 }
 
+function resumeRecognition() {
+  // Після відповіді Андрія — відновлюємо слухання
+  accumulatedTranscript = '';
+  if (voiceActive) {
+    callHint.textContent = 'Слухаю... Говоріть';
+    setStatus('listening');
+    setTimeout(() => startRecognitionSession(), 400);
+  }
+}
+
+function stopContinuousListening() {
+  voiceActive = false;
+  isListening = false;
+  isBusy = false;
+  clearTimeout(silenceTimer);
+  silenceTimer = null;
+  accumulatedTranscript = '';
+  callBtn.classList.remove('listening');
+  callHint.textContent = 'Натисніть щоб увімкнути мікрофон';
+  if (recognition) {
+    try { recognition.stop(); } catch(e) {}
+    recognition = null;
+  }
+  // Повертаємось до Waiting відео
+  statusBadge.className = '';
+  statusBadge.textContent = '● Очікування';
+  startMainVideo('waiting', true);
+}
+
 async function sendVoiceText(text) {
   if (!text || isBusy) return;
   isBusy = true;
 
-  // В голосовому режимі — не показуємо typing індикатор, одразу чекаємо відповіді
+  // Зупиняємо recognition поки відповідаємо
+  pauseRecognition();
+
   statusBadge.className = '';
   statusBadge.textContent = '● Очікування';
-  // Waiting вже грає після stopListening
 
   try {
     const res = await fetch(N8N_WEBHOOK, {
@@ -862,28 +965,25 @@ async function sendVoiceText(text) {
       body: JSON.stringify({ message: text, user_id: userId, mode: 'voice' })
     });
     const data = await res.json();
-    // немає typing indicator у голосовому режимі — нічого не видаляємо
 
-    const reply = data.reply || data.text || '';
-    // У голосовому режимі текст не показуємо — тільки аудіо
     if (data.audio_base64) {
       setStatus('speaking');
       audioViz.classList.add('active');
       playBase64Audio(data.audio_base64, () => {
         audioViz.classList.remove('active');
-        statusBadge.className = '';
-        statusBadge.textContent = '● Очікування';
-        startMainVideo('waiting', true);
         isBusy = false;
+        startMainVideo('waiting', true);
+        resumeRecognition(); // повертаємось до слухання після відповіді
       });
     } else {
-      setStatus('idle');
       isBusy = false;
+      resumeRecognition();
     }
   } catch(e) {
-    addMessage('andrii', 'Вибачте, виникла помилка. Спробуйте ще раз.');
-    startMainVideo('waiting', true);
+    console.error('Voice send error:', e);
     isBusy = false;
+    startMainVideo('waiting', true);
+    resumeRecognition();
   }
 }
 
