@@ -550,8 +550,12 @@
 // ── CONFIG ──
 const N8N_WEBHOOK = 'https://n8n.srv1421181.hstgr.cloud/webhook/autosmart-andrii';
 const VIDEOS = {
-  speaking: 'https://raw.githubusercontent.com/bogdangodluk22-art/AutoSmart_TG/main/Speaking.mp4',
-  typing:   'https://raw.githubusercontent.com/bogdangodluk22-art/AutoSmart_TG/main/Typing.mp4',
+  speaking:      'https://raw.githubusercontent.com/bogdangodluk22-art/AutoSmart_TG/main/Speaking.mp4',
+  typing:        'https://raw.githubusercontent.com/bogdangodluk22-art/AutoSmart_TG/main/Typing.mp4',
+  startChating:  'https://raw.githubusercontent.com/bogdangodluk22-art/AutoSmart_TG/main/Start%20Chating.mp4',
+  watching:      'https://raw.githubusercontent.com/bogdangodluk22-art/AutoSmart_TG/main/Watching.mp4',
+  startTalking:  'https://raw.githubusercontent.com/bogdangodluk22-art/AutoSmart_TG/main/Start%20Talking.mp4',
+  waiting:       'https://raw.githubusercontent.com/bogdangodluk22-art/AutoSmart_TG/main/Waiting.mp4',
 };
 
 // ── TELEGRAM INIT ──
@@ -586,7 +590,11 @@ introVideo.addEventListener('ended', () => {
 document.getElementById('start-btn').addEventListener('click', () => {
   introOverlay.classList.add('hidden');
   setTimeout(() => { introOverlay.style.display = 'none'; }, 600);
-  startMainVideo('speaking');
+  appStarted = true;
+  // Текстовий режим по дефолту → Start Chating → Watching (loop)
+  startMainVideo('startChating', false, () => {
+    startMainVideo('watching', true);
+  });
   addMessage('andrii', 'Вітаю! Я Андрій Мельник, Co-Founder AutoSmart. У нас 20 преміальних авто з 4 країн. Який автомобіль вашої мрії?');
 });
 
@@ -594,11 +602,18 @@ document.getElementById('start-btn').addEventListener('click', () => {
 const mainVideo = document.getElementById('main-video');
 const mainSrc = document.getElementById('main-src');
 
-function startMainVideo(state) {
-  const url = VIDEOS[state] || VIDEOS.speaking;
+function startMainVideo(state, loop = true, onEnded = null) {
+  const url = VIDEOS[state];
+  if (!url) return;
   if (mainSrc.src !== url) {
     mainSrc.src = url;
     mainVideo.load();
+  }
+  mainVideo.loop = loop;
+  if (onEnded) {
+    mainVideo.onended = () => { mainVideo.onended = null; onEnded(); };
+  } else {
+    mainVideo.onended = null;
   }
   mainVideo.play().catch(() => {});
 }
@@ -612,26 +627,31 @@ function setStatus(s) {
   if (s === 'typing') {
     statusBadge.textContent = '● Друкує відповідь';
     statusBadge.classList.add('active');
-    startMainVideo('typing');
+    startMainVideo('typing', false, () => {
+      startMainVideo('watching', true);
+    });
     audioViz.classList.remove('active');
   } else if (s === 'speaking') {
     statusBadge.textContent = '● Відповідає';
     statusBadge.classList.add('speaking');
-    startMainVideo('speaking');
+    startMainVideo('speaking', true);
     audioViz.classList.add('active');
   } else if (s === 'listening') {
     statusBadge.textContent = '● Слухає вас';
     statusBadge.classList.add('active');
-    startMainVideo('speaking');
+    startMainVideo('waiting', true);
     audioViz.classList.remove('active');
   } else {
+    // idle
     statusBadge.textContent = '● Очікування';
-    startMainVideo('speaking');
+    // не перемикаємо відео — залишається те що грало (Watching або Waiting)
     audioViz.classList.remove('active');
   }
 }
 
 // ── MODE SWITCH ──
+let appStarted = false; // флаг — overlay ще відкритий
+
 function setMode(m) {
   mode = m;
   document.getElementById('btn-text').classList.toggle('active', m === 'text');
@@ -639,8 +659,19 @@ function setMode(m) {
   document.getElementById('text-input-row').style.display = m === 'text' ? 'flex' : 'none';
   const vc = document.getElementById('voice-controls');
   m === 'voice' ? vc.classList.add('active') : vc.classList.remove('active');
-  // Клас для приховування чату у voice режимі
   document.getElementById('app').classList.toggle('voice-mode', m === 'voice');
+
+  if (!appStarted) return; // overlay ще відкритий — відео не чіпаємо
+
+  if (m === 'text') {
+    startMainVideo('startChating', false, () => {
+      startMainVideo('watching', true);
+    });
+  } else {
+    startMainVideo('startTalking', false, () => {
+      startMainVideo('waiting', true);
+    });
+  }
 }
 
 // ── MESSAGES ──
@@ -839,7 +870,9 @@ async function sendVoiceText(text) {
       audioViz.classList.add('active');
       playBase64Audio(data.audio_base64, () => {
         audioViz.classList.remove('active');
-        setStatus('idle');
+        statusBadge.className = '';
+        statusBadge.textContent = '● Очікування';
+        startMainVideo('waiting', true);
         isBusy = false;
       });
     } else {
@@ -856,7 +889,7 @@ async function sendVoiceText(text) {
 
 // ── INIT ──
 setMode('text');
-setStatus('idle');
+// Відео стартує тільки після кнопки РОЗПОЧАТИ КОНСУЛЬТАЦІЮ — нічого не грає одразу
 </script>
 </body>
 </html>
