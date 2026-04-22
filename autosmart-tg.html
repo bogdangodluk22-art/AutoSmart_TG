@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>AutoSmart — Андрій Мельник</title>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
+<script src="https://unpkg.com/@elevenlabs/convai-widget-embed" async type="text/javascript"></script>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
 
@@ -83,10 +84,12 @@
     text-transform: uppercase;
     transition: all 0.4s ease;
     z-index: 10;
+    white-space: nowrap;
   }
 
   #status-badge.active { border-color: rgba(200,169,110,0.8); background: rgba(200,169,110,0.15); }
   #status-badge.speaking { border-color: rgba(33,150,243,0.8); background: rgba(33,150,243,0.15); color: #64b5f6; }
+  #status-badge.el-active { border-color: rgba(200,169,110,0.8); background: rgba(200,169,110,0.12); color: var(--gold-light); }
 
   /* name plate */
   #nameplate {
@@ -298,17 +301,29 @@
   #send-btn:active { transform: scale(0.92); }
   #send-btn svg { width: 16px; height: 16px; }
 
-  /* VOICE MODE */
+  /* ── VOICE MODE — ElevenLabs zone ── */
   #voice-controls {
     display: none;
     flex-direction: column;
     align-items: center;
-    gap: 10px;
+    gap: 12px;
   }
   #voice-controls.active { display: flex; }
 
+  /* ElevenLabs widget — прихований, але активний */
+  #el-widget-wrap {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    opacity: 0;
+    pointer-events: none;
+    bottom: 0; left: 0;
+  }
+
+  /* Наша кастомна кнопка виклику */
   #call-btn {
-    width: 64px; height: 64px;
+    width: 68px; height: 68px;
     border-radius: 50%;
     border: none;
     background: linear-gradient(135deg, var(--gold), #8a5a20);
@@ -321,11 +336,11 @@
     transition: all 0.2s;
     position: relative;
   }
-  #call-btn.listening {
+  #call-btn.connected {
     background: linear-gradient(135deg, #ef5350, #b71c1c);
-    box-shadow: 0 4px 20px rgba(239,83,80,0.4);
+    box-shadow: 0 4px 24px rgba(239,83,80,0.45);
   }
-  #call-btn.listening::before {
+  #call-btn.connected::before {
     content: '';
     position: absolute;
     inset: -6px;
@@ -333,11 +348,19 @@
     border: 2px solid rgba(239,83,80,0.4);
     animation: pulse-ring 1.5s ease-out infinite;
   }
+  #call-btn.speaking-pulse::after {
+    content: '';
+    position: absolute;
+    inset: -12px;
+    border-radius: 50%;
+    border: 1px solid rgba(200,169,110,0.2);
+    animation: pulse-ring 2s ease-out infinite 0.5s;
+  }
   @keyframes pulse-ring {
     0% { transform: scale(1); opacity: 1; }
     100% { transform: scale(1.4); opacity: 0; }
   }
-  #call-btn svg { width: 26px; height: 26px; }
+  #call-btn svg { width: 28px; height: 28px; }
   #call-btn:active { transform: scale(0.95); }
 
   #call-hint {
@@ -346,6 +369,18 @@
     color: var(--text-muted);
     text-transform: uppercase;
     font-family: 'Courier New', monospace;
+    text-align: center;
+    transition: color 0.3s;
+  }
+  #call-hint.live { color: var(--gold); }
+
+  /* Voice info tip */
+  #voice-tip {
+    font-size: 10px;
+    color: rgba(138,135,153,0.6);
+    letter-spacing: 0.5px;
+    font-family: 'Courier New', monospace;
+    text-align: center;
   }
 
   /* ── INTRO OVERLAY ── */
@@ -506,15 +541,26 @@
 
       <!-- VOICE MODE -->
       <div id="voice-controls">
-        <button id="call-btn" onclick="toggleVoice()">
-          <svg id="mic-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <button id="call-btn" onclick="toggleCall()">
+          <!-- Mic icon (idle) -->
+          <svg id="icon-mic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
             <path d="M19 10v2a7 7 0 0 1-14 0v-2M12 19v4M8 23h8"/>
           </svg>
+          <!-- End call icon (during call) -->
+          <svg id="icon-end" viewBox="0 0 24 24" fill="currentColor" style="display:none">
+            <path d="M6.6 10.8c1.4 2.8 3.8 5.1 6.6 6.6l2.2-2.2c.3-.3.7-.4 1-.2 1.1.4 2.3.6 3.6.6.6 0 1 .4 1 1V20c0 .6-.4 1-1 1C10.6 21 3 13.4 3 4c0-.6.4-1 1-1h3.5c.6 0 1 .4 1 1 0 1.3.2 2.5.6 3.6.1.3 0 .7-.2 1L6.6 10.8z"/>
+          </svg>
         </button>
-        <div id="call-hint">Натисніть щоб говорити</div>
+        <div id="call-hint">Натисніть щоб подзвонити</div>
+        <div id="voice-tip">Голосовий дзвінок з Андрієм</div>
       </div>
     </div>
+  </div>
+
+  <!-- ElevenLabs widget — прихований контейнер -->
+  <div id="el-widget-wrap">
+    <elevenlabs-convai agent-id="agent_0601kptnnsxxf9vv9wpz4gahq0rn"></elevenlabs-convai>
   </div>
 
 </div>
@@ -522,6 +568,7 @@
 <script>
 // ── CONFIG ──
 const N8N_WEBHOOK = 'https://n8n.srv1421181.hstgr.cloud/webhook/autosmart-andrii';
+const EL_AGENT_ID = 'agent_0601kptnnsxxf9vv9wpz4gahq0rn';
 const VIDEOS = {
   speaking: 'https://raw.githubusercontent.com/bogdangodluk22-art/AutoSmart_TG/main/Speaking.mp4',
   typing:   'https://raw.githubusercontent.com/bogdangodluk22-art/AutoSmart_TG/main/Typing.mp4',
@@ -541,20 +588,114 @@ try {
 } catch(e) {}
 
 // ── STATE ──
-let mode = 'text';      // 'text' | 'voice'
+let mode = 'text';
 let isBusy = false;
-let isListening = false;
-let mediaRecorder = null;
-let audioChunks = [];
-let recognition = null;
+let elConnected = false;  // чи активний ElevenLabs дзвінок
+
+// ── ELEVENLABS WIDGET INTEGRATION ──
+let elWidget = null;
+
+function getElWidget() {
+  if (!elWidget) {
+    elWidget = document.querySelector('elevenlabs-convai');
+  }
+  return elWidget;
+}
+
+// Слухаємо події від ElevenLabs widget
+document.addEventListener('elevenlabs-convai:call-started', () => {
+  elConnected = true;
+  onCallStarted();
+});
+
+document.addEventListener('elevenlabs-convai:call-ended', () => {
+  elConnected = false;
+  onCallEnded();
+});
+
+document.addEventListener('elevenlabs-convai:agent-speaking', () => {
+  setStatus('speaking');
+  audioViz.classList.add('active');
+  document.getElementById('call-btn').classList.add('speaking-pulse');
+});
+
+document.addEventListener('elevenlabs-convai:agent-not-speaking', () => {
+  if (elConnected) {
+    setStatus('el-active');
+    audioViz.classList.remove('active');
+    document.getElementById('call-btn').classList.remove('speaking-pulse');
+  }
+});
+
+function onCallStarted() {
+  const btn = document.getElementById('call-btn');
+  btn.classList.add('connected');
+  btn.classList.remove('speaking-pulse');
+  document.getElementById('icon-mic').style.display = 'none';
+  document.getElementById('icon-end').style.display = 'block';
+  document.getElementById('call-hint').textContent = 'Натисніть щоб завершити';
+  document.getElementById('call-hint').classList.add('live');
+  setStatus('el-active');
+  startMainVideo('speaking');
+}
+
+function onCallEnded() {
+  const btn = document.getElementById('call-btn');
+  btn.classList.remove('connected');
+  btn.classList.remove('speaking-pulse');
+  document.getElementById('icon-mic').style.display = 'block';
+  document.getElementById('icon-end').style.display = 'none';
+  document.getElementById('call-hint').textContent = 'Натисніть щоб подзвонити';
+  document.getElementById('call-hint').classList.remove('live');
+  audioViz.classList.remove('active');
+  setStatus('idle');
+}
+
+function toggleCall() {
+  const widget = getElWidget();
+  if (!widget) return;
+
+  if (!elConnected) {
+    // Запускаємо дзвінок — знаходимо та клікаємо кнопку виклику у widget
+    const shadow = widget.shadowRoot;
+    if (shadow) {
+      // ElevenLabs widget має кнопку start call всередині shadow DOM
+      const startBtn = shadow.querySelector('button[aria-label*="call"], button[aria-label*="Call"], button.call-button, button[data-testid="call-button"], button');
+      if (startBtn) {
+        startBtn.click();
+        return;
+      }
+    }
+    // Fallback: спробуємо через widget API якщо доступне
+    if (typeof widget.startSession === 'function') {
+      widget.startSession();
+    } else if (typeof widget.startCall === 'function') {
+      widget.startCall();
+    }
+  } else {
+    // Завершуємо дзвінок
+    const shadow = widget.shadowRoot;
+    if (shadow) {
+      const endBtn = shadow.querySelector('button[aria-label*="end"], button[aria-label*="End"], button[aria-label*="stop"], button[data-testid="end-call"]');
+      if (endBtn) {
+        endBtn.click();
+        return;
+      }
+      // Якщо не знайшли специфічну — клікаємо першу кнопку (toggle)
+      const anyBtn = shadow.querySelector('button');
+      if (anyBtn) anyBtn.click();
+    }
+    if (typeof widget.endSession === 'function') {
+      widget.endSession();
+    } else if (typeof widget.endCall === 'function') {
+      widget.endCall();
+    }
+  }
+}
 
 // ── INTRO ──
 const introVideo = document.getElementById('intro-video');
 const introOverlay = document.getElementById('intro-overlay');
-
-introVideo.addEventListener('ended', () => {
-  // video ended — button already visible, do nothing
-});
 
 document.getElementById('start-btn').addEventListener('click', () => {
   introOverlay.classList.add('hidden');
@@ -592,11 +733,10 @@ function setStatus(s) {
     statusBadge.classList.add('speaking');
     startMainVideo('speaking');
     audioViz.classList.add('active');
-  } else if (s === 'listening') {
-    statusBadge.textContent = '● Слухає вас';
-    statusBadge.classList.add('active');
+  } else if (s === 'el-active') {
+    statusBadge.textContent = '● Дзвінок активний';
+    statusBadge.classList.add('el-active');
     startMainVideo('speaking');
-    audioViz.classList.remove('active');
   } else {
     statusBadge.textContent = '● Очікування';
     startMainVideo('speaking');
@@ -612,6 +752,11 @@ function setMode(m) {
   document.getElementById('text-input-row').style.display = m === 'text' ? 'flex' : 'none';
   const vc = document.getElementById('voice-controls');
   m === 'voice' ? vc.classList.add('active') : vc.classList.remove('active');
+
+  // Якщо переключились на текст під час дзвінку — завершуємо дзвінок
+  if (m === 'text' && elConnected) {
+    toggleCall();
+  }
 }
 
 // ── MESSAGES ──
@@ -698,127 +843,6 @@ async function sendText() {
   }
 
   isBusy = false;
-}
-
-// ── VOICE MODE ──
-const callBtn = document.getElementById('call-btn');
-const callHint = document.getElementById('call-hint');
-
-function toggleVoice() {
-  if (isBusy) return;
-  if (!isListening) startListening();
-  else stopListening();
-}
-
-function startListening() {
-  isListening = true;
-  callBtn.classList.add('listening');
-  callHint.textContent = 'Говоріть зараз...';
-  setStatus('listening');
-
-  // Web Speech API (якщо доступна)
-  if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
-    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-    recognition = new SpeechRecognition();
-    recognition.lang = 'uk-UA';
-    recognition.continuous = false;
-    recognition.interimResults = false;
-
-    recognition.onresult = (e) => {
-      const transcript = e.results[0][0].transcript;
-      stopListening();
-      if (transcript) sendVoiceText(transcript);
-    };
-
-    recognition.onerror = () => {
-      stopListening();
-      addMessage('andrii', 'Не вдалося розпізнати мову. Спробуйте ще раз або використайте текстовий режим.');
-      setStatus('idle');
-    };
-
-    recognition.onend = () => {
-      if (isListening) stopListening();
-    };
-
-    recognition.start();
-  } else {
-    // Fallback: просто показуємо повідомлення
-    setTimeout(() => {
-      stopListening();
-      addMessage('andrii', 'Голосовий режим не підтримується у вашому браузері. Використайте текстовий режим.');
-      setStatus('idle');
-    }, 2000);
-  }
-}
-
-function stopListening() {
-  isListening = false;
-  callBtn.classList.remove('listening');
-  callHint.textContent = 'Натисніть щоб говорити';
-  if (recognition) {
-    try { recognition.stop(); } catch(e) {}
-    recognition = null;
-  }
-}
-
-async function sendVoiceText(text) {
-  if (!text || isBusy) return;
-  isBusy = true;
-
-  addMessage('user', '🎤 ' + text);
-  addTypingIndicator();
-  setStatus('typing');
-
-  try {
-    const res = await fetch(N8N_WEBHOOK, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        message: text,
-        source: 'voice',
-        user_id: userId,
-        mode: 'voice'   // → n8n буде знати що треба ElevenLabs
-      })
-    });
-    const data = await res.json();
-    removeTypingIndicator();
-
-    const reply = data.reply || data.text || '';
-    if (reply) addMessage('andrii', reply);
-
-    // Якщо n8n повертає audio_url від ElevenLabs
-    if (data.audio_url) {
-      setStatus('speaking');
-      const audio = new Audio(data.audio_url);
-      audio.play();
-      audio.onended = () => { setStatus('idle'); isBusy = false; };
-    } else {
-      // Fallback: TTS через ElevenLabs напряму якщо є base64
-      if (data.audio_base64) {
-        setStatus('speaking');
-        const blob = b64ToBlob(data.audio_base64, 'audio/mpeg');
-        const url = URL.createObjectURL(blob);
-        const audio = new Audio(url);
-        audio.play();
-        audio.onended = () => { setStatus('idle'); isBusy = false; URL.revokeObjectURL(url); };
-      } else {
-        setStatus('idle');
-        isBusy = false;
-      }
-    }
-  } catch(e) {
-    removeTypingIndicator();
-    addMessage('andrii', 'Вибачте, виникла помилка. Спробуйте ще раз.');
-    setStatus('idle');
-    isBusy = false;
-  }
-}
-
-function b64ToBlob(b64, mime) {
-  const bytes = atob(b64);
-  const arr = new Uint8Array(bytes.length);
-  for (let i = 0; i < bytes.length; i++) arr[i] = bytes.charCodeAt(i);
-  return new Blob([arr], { type: mime });
 }
 
 // ── INIT ──
