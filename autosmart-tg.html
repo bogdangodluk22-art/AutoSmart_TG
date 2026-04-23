@@ -650,7 +650,7 @@ function setMode(m) {
 
   if (m === 'text') {
     // Якщо була активна голосова сесія — зупиняємо
-    if (voiceActive) stopContinuousListening();
+    if (voiceActive) stopMediaRecording();
     startMainVideo('startChating', false, () => {
       startMainVideo('watching', true);
     });
@@ -782,172 +782,197 @@ function playBase64Audio(base64, onEnded) {
   }
 }
 
-// ── CONTINUOUS VOICE ──
-// Стан: voiceActive = сесія активна (кнопка натиснута)
-// isBusy = Андрій зараз відповідає (recognition пауза)
-// isListening = recognition.start() викликано і працює
+// ── CONTINUOUS VOICE (MediaRecorder + Whisper) ──
+// Працює на iOS Telegram WebApp — використовує MediaRecorder замість Web Speech API
+// Логіка: запис → VAD (аналіз гучності) → пауза 2.5 сек → відправка на Whisper
+
 let voiceActive = false;
+let mediaRecorder = null;
+let audioChunks = [];
 let silenceTimer = null;
-let accumulatedTranscript = '';
-let isSpeaking = false; // користувач зараз говорить (є interim results)
+let vadAnalyser = null;
+let vadSource = null;
+let vadInterval = null;
+let lastSoundTime = 0;
+let hasSpeech = false; // чи було хоч якесь мовлення в поточному записі
+
+const SILENCE_DELAY = 2500;   // мс тиші перед відправкою
+const SOUND_THRESHOLD = 18;   // поріг гучності (0-255), нижче = тиша
+const MIN_SPEECH_MS = 300;    // мінімальна тривалість мовлення щоб відправити
 
 function toggleVoice() {
-  getAudioCtx(); // user gesture — ініціалізуємо AudioContext
+  getAudioCtx();
   if (!voiceActive) {
-    startContinuousListening();
+    startMediaRecording();
   } else {
-    stopContinuousListening();
+    stopMediaRecording();
   }
 }
 
-function startContinuousListening() {
-  if (!('webkitSpeechRecognition' in window || 'SpeechRecognition' in window)) {
-    addMessage('andrii', 'Голосовий ввід не підтримується. Використайте текстовий режим.');
+async function startMediaRecording() {
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    addMessage('andrii', 'Мікрофон недоступний. Використайте текстовий режим.');
     return;
   }
 
-  voiceActive = true;
-  callBtn.classList.add('listening');
-  callHint.textContent = 'Слухаю... Говоріть';
-  setStatus('listening');
-  accumulatedTranscript = '';
-
-  startRecognitionSession();
-}
-
-function startRecognitionSession() {
-  if (!voiceActive) return;
-
-  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-  recognition = new SR();
-  recognition.lang = 'uk-UA';
-  recognition.continuous = true;       // не зупиняється після паузи
-  recognition.interimResults = true;   // отримуємо проміжні результати
-
-  recognition.onstart = () => {
-    isListening = true;
-  };
-
-  recognition.onresult = (e) => {
-    if (!voiceActive || isBusy) return;
-
-    let interimText = '';
-    let finalText = '';
-
-    for (let i = e.resultIndex; i < e.results.length; i++) {
-      const t = e.results[i][0].transcript;
-      if (e.results[i].isFinal) {
-        finalText += t;
-      } else {
-        interimText += t;
-      }
-    }
-
-    // Є проміжний текст — користувач говорить, скидаємо таймер
-    if (interimText) {
-      clearTimeout(silenceTimer);
-      silenceTimer = null;
-    }
-
-    // Отримали фінальний фрагмент — акумулюємо і запускаємо таймер паузи
-    if (finalText) {
-      accumulatedTranscript += (accumulatedTranscript ? ' ' : '') + finalText.trim();
-      clearTimeout(silenceTimer);
-
-      // 3 секунди тиші після останнього слова → відправляємо
-      silenceTimer = setTimeout(() => {
-        if (accumulatedTranscript && voiceActive && !isBusy) {
-          const textToSend = accumulatedTranscript.trim();
-          accumulatedTranscript = '';
-          sendVoiceText(textToSend);
-        }
-      }, 3000);
-    }
-  };
-
-  recognition.onerror = (e) => {
-    isListening = false;
-    // 'no-speech' — нормальна ситуація, просто рестартуємо
-    if (e.error === 'no-speech' || e.error === 'aborted') {
-      if (voiceActive && !isBusy) setTimeout(() => startRecognitionSession(), 300);
-      return;
-    }
-    console.warn('Speech error:', e.error);
-    // Серйозна помилка — рестартуємо через секунду
-    if (voiceActive && !isBusy) setTimeout(() => startRecognitionSession(), 1000);
-  };
-
-  recognition.onend = () => {
-    isListening = false;
-    // Браузер зупинив сесію (таймаут ~60с) — автоматично рестартуємо
-    if (voiceActive && !isBusy) {
-      setTimeout(() => startRecognitionSession(), 200);
-    }
-  };
-
   try {
-    recognition.start();
-  } catch(e) {
-    console.warn('Recognition start error:', e);
-    if (voiceActive && !isBusy) setTimeout(() => startRecognitionSession(), 500);
-  }
-}
-
-function pauseRecognition() {
-  // Зупиняємо recognition поки Андрій говорить (щоб не записував свою відповідь)
-  isListening = false;
-  clearTimeout(silenceTimer);
-  silenceTimer = null;
-  if (recognition) {
-    try { recognition.stop(); } catch(e) {}
-    recognition = null;
-  }
-}
-
-function resumeRecognition() {
-  // Після відповіді Андрія — відновлюємо слухання
-  accumulatedTranscript = '';
-  if (voiceActive) {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+    voiceActive = true;
+    callBtn.classList.add('listening');
     callHint.textContent = 'Слухаю... Говоріть';
     setStatus('listening');
-    setTimeout(() => startRecognitionSession(), 400);
+
+    // VAD через AnalyserNode — відстежуємо гучність в реальному часі
+    const ctx = getAudioCtx();
+    vadSource = ctx.createMediaStreamSource(stream);
+    vadAnalyser = ctx.createAnalyser();
+    vadAnalyser.fftSize = 512;
+    vadSource.connect(vadAnalyser);
+
+    // Починаємо перший запис
+    startChunk(stream);
+
+    // VAD loop — кожні 100мс перевіряємо гучність
+    const dataArray = new Uint8Array(vadAnalyser.frequencyBinCount);
+    lastSoundTime = Date.now();
+    hasSpeech = false;
+
+    vadInterval = setInterval(() => {
+      if (!voiceActive || isBusy) return;
+      vadAnalyser.getByteFrequencyData(dataArray);
+      const avg = dataArray.reduce((a, b) => a + b, 0) / dataArray.length;
+
+      if (avg > SOUND_THRESHOLD) {
+        // Є звук — скидаємо таймер тиші
+        lastSoundTime = Date.now();
+        hasSpeech = true;
+        clearTimeout(silenceTimer);
+        silenceTimer = null;
+      } else {
+        // Тиша — якщо вже говорили, запускаємо таймер
+        if (hasSpeech && !silenceTimer) {
+          silenceTimer = setTimeout(() => {
+            if (voiceActive && !isBusy && hasSpeech) {
+              flushRecording();
+            }
+          }, SILENCE_DELAY);
+        }
+      }
+    }, 100);
+
+  } catch(e) {
+    console.error('Microphone error:', e);
+    addMessage('andrii', 'Не вдалось отримати доступ до мікрофону.');
+    voiceActive = false;
   }
 }
 
-function stopContinuousListening() {
-  voiceActive = false;
-  isListening = false;
-  isBusy = false;
+function startChunk(stream) {
+  if (!voiceActive) return;
+  audioChunks = [];
+
+  // Вибираємо формат який підтримує iOS
+  const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+    ? 'audio/webm;codecs=opus'
+    : MediaRecorder.isTypeSupported('audio/mp4')
+      ? 'audio/mp4'
+      : 'audio/ogg';
+
+  try {
+    mediaRecorder = new MediaRecorder(stream, { mimeType });
+  } catch(e) {
+    mediaRecorder = new MediaRecorder(stream);
+  }
+
+  mediaRecorder.ondataavailable = (e) => {
+    if (e.data && e.data.size > 0) audioChunks.push(e.data);
+  };
+
+  mediaRecorder.start(100); // chunk кожні 100мс
+}
+
+function flushRecording() {
+  if (!mediaRecorder || isBusy) return;
+  hasSpeech = false;
   clearTimeout(silenceTimer);
   silenceTimer = null;
-  accumulatedTranscript = '';
+
+  // Зупиняємо поточний chunk і відправляємо
+  mediaRecorder.stop();
+  mediaRecorder.onstop = async () => {
+    if (!voiceActive) return;
+    const blob = new Blob(audioChunks, { type: mediaRecorder.mimeType });
+    audioChunks = [];
+
+    if (blob.size < 1000) {
+      // Занадто малий файл — просто рестартуємо
+      if (voiceActive && !isBusy) startChunk(mediaRecorder.stream);
+      return;
+    }
+
+    await sendVoiceBlob(blob);
+
+    // Після відправки — починаємо новий chunk якщо ще активні
+    if (voiceActive && !isBusy) startChunk(mediaRecorder.stream);
+  };
+}
+
+function stopMediaRecording() {
+  voiceActive = false;
+  isBusy = false;
+  hasSpeech = false;
+  clearTimeout(silenceTimer);
+  silenceTimer = null;
+  clearInterval(vadInterval);
+  vadInterval = null;
+
+  if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+    try { mediaRecorder.stop(); } catch(e) {}
+  }
+  if (vadSource) { try { vadSource.disconnect(); } catch(e) {} vadSource = null; }
+  vadAnalyser = null;
+  audioChunks = [];
+
   callBtn.classList.remove('listening');
   callHint.textContent = 'Натисніть щоб увімкнути мікрофон';
-  if (recognition) {
-    try { recognition.stop(); } catch(e) {}
-    recognition = null;
-  }
-  // Повертаємось до Waiting відео
   statusBadge.className = '';
   statusBadge.textContent = '● Очікування';
   startMainVideo('waiting', true);
 }
 
-async function sendVoiceText(text) {
-  if (!text || isBusy) return;
+function resumeListening() {
+  if (!voiceActive || !mediaRecorder) return;
+  hasSpeech = false;
+  clearTimeout(silenceTimer);
+  silenceTimer = null;
+  callHint.textContent = 'Слухаю... Говоріть';
+  setStatus('listening');
+  startChunk(mediaRecorder.stream);
+}
+
+async function sendVoiceBlob(blob) {
+  if (isBusy) return;
   isBusy = true;
 
-  // Зупиняємо recognition поки відповідаємо
-  pauseRecognition();
+  // Зупиняємо запис поки Андрій відповідає
+  if (mediaRecorder && mediaRecorder.state === 'recording') {
+    try { mediaRecorder.stop(); } catch(e) {}
+  }
 
   statusBadge.className = '';
   statusBadge.textContent = '● Очікування';
 
   try {
+    // Відправляємо аудіо blob + user_id як FormData
+    const formData = new FormData();
+    const ext = blob.type.includes('mp4') ? 'mp4' : blob.type.includes('ogg') ? 'ogg' : 'webm';
+    formData.append('audio', blob, `voice.${ext}`);
+    formData.append('user_id', userId);
+    formData.append('mode', 'voice');
+
     const res = await fetch(N8N_WEBHOOK, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message: text, user_id: userId, mode: 'voice' })
+      body: formData
     });
     const data = await res.json();
 
@@ -958,17 +983,17 @@ async function sendVoiceText(text) {
         audioViz.classList.remove('active');
         isBusy = false;
         startMainVideo('waiting', true);
-        resumeRecognition(); // повертаємось до слухання після відповіді
+        resumeListening();
       });
     } else {
       isBusy = false;
-      resumeRecognition();
+      resumeListening();
     }
   } catch(e) {
     console.error('Voice send error:', e);
     isBusy = false;
     startMainVideo('waiting', true);
-    resumeRecognition();
+    resumeListening();
   }
 }
 
