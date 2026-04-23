@@ -560,9 +560,8 @@ try {
 let mode = 'text';      // 'text' | 'voice'
 let isBusy = false;
 let isListening = false;
-let mediaRecorder = null;
-let audioChunks = [];
 let recognition = null;
+let appStarted = false; // флаг — overlay ще відкритий
 
 // ── INTRO ──
 const introVideo = document.getElementById('intro-video');
@@ -635,7 +634,6 @@ function setStatus(s) {
 }
 
 // ── MODE SWITCH ──
-let appStarted = false; // флаг — overlay ще відкритий
 
 function setMode(m) {
   mode = m;
